@@ -1,0 +1,2 @@
+# Keep LF in the repository so the macOS runner checks out exactly what was authored.
+* text=auto eol=lf
