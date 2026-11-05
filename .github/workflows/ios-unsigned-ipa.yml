@@ -1,0 +1,96 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  API_BASE_URL: ${{ vars.API_BASE_URL || '' }}
+
+jobs:
+  build:
+    # Public repositories get GitHub-hosted macOS runners at no charge.
+    # Private repos bill macOS minutes at a 10x multiplier.
+    runs-on: macos-15
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate the iOS Runner Xcode project
+        # This keeps the repo Windows-authored: no Xcode project files need to
+        # be hand-written, they are produced here on a real macOS runner.
+        run: |
+          flutter create \
+            --org com.example.reader \
+            --project-name manga_reader \
+            --platforms=ios \
+            _runner
+          cp -R _runner/ios ./ios
+          rm -rf _runner
+
+      - name: Install app sources
+        # flutter create leaves a counter widget_test.dart that references MyApp;
+        # remove the template lib/ and test/ before copying ours in.
+        run: |
+          rm -rf lib test
+          cp -R app-src/. .
+
+      - name: Raise iOS deployment target
+        # flutter_secure_storage and recent plugins need >= 13.0; 16.0 covers
+        # iPhone 14 Pro and still runs on iOS 27.2 (forward compatible).
+        run: |
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' \
+            ios/Runner.xcodeproj/project.pbxproj
+          grep -m1 IPHONEOS_DEPLOYMENT_TARGET ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Unit tests
+        run: flutter test
+
+      - name: Build iOS release without codesigning
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
+
+      - name: Pack unsigned IPA
+        # -y preserves symlinks inside .framework bundles.
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr -y manga_reader-unsigned.ipa Payload
+          unzip -t manga_reader-unsigned.ipa | tail -2
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            Payload/Runner.app/Info.plist
+          shasum -a 256 manga_reader-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga_reader-unsigned-ipa
+          path: manga_reader-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

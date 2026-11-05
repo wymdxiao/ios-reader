@@ -1,0 +1,14 @@
+# Generated on the macOS runner, never commit locally.
+ios/
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+pubspec.lock
+Payload/
+*.ipa
+*.xcarchive
+*.p12
+*.mobileprovision
+.DS_Store
