@@ -73,7 +73,14 @@ class ApiClient {
     if (r.statusCode < 200 || r.statusCode >= 300) {
       throw ApiException(r.statusCode, 'HTTP ${r.statusCode}');
     }
-    final Object? decoded = jsonDecode(utf8.decode(r.bodyBytes));
+    // A gateway error page or a non-UTF8 body must surface as ApiException,
+    // otherwise an uncaught FormatException unwinds into the UI layer.
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(r.bodyBytes));
+    } catch (e) {
+      throw ApiException(r.statusCode, '响应不是合法 JSON: $e');
+    }
     if (decoded is Json) return decoded;
     if (decoded is Map) return Map<String, dynamic>.from(decoded);
     throw ApiException(r.statusCode, '响应不是 JSON 对象');
